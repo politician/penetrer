@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>swim</title>
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+canvas { position: fixed; inset: 0; display: block; }
+</style>
+</head>
+<body>
+<canvas id="trail"></canvas>
+<canvas id="fg"></canvas>
+
+<script id="core">
+// Pure logic. No DOM, no timers, no globals from the page.
+// Everything in this block is extracted and unit-tested by test/run.js.
+
+const DESIGN_W = 100;        // design-space width
+const DESIGN_H = 140;        // design-space height, y increases downward
+const CELLS_TALL = 120;      // drawing height in grid cells
+const FILL_FRACTION = 0.85;  // fraction of the viewport the drawing occupies
+const DURATION_1X = 300;     // seconds for one full traversal at 1x
+const MAX_DELTA = 0.1;       // seconds; clamp so a backgrounded tab resumes
+const HOT_SECONDS = 1.5;     // how long a freshly filled cell stays bright
+
+// Advance the progress cursor. delta is wall-clock seconds since the previous
+// frame, clamped so a backgrounded tab resumes rather than fast-forwarding, and
+// floored at zero so progress never runs backwards.
+function advance(progress, delta, speed) {
+  const d = Math.min(Math.max(delta, 0), MAX_DELTA);
+  return progress + (d * speed) / DURATION_1X;
+}
+</script>
+
+<script id="app">
+// DOM, canvas and animation.
+</script>
+</body>
+</html>
