@@ -15,6 +15,7 @@ const EXPORTS = [
   'advance',
   'arcPoints', 'OUTLINE', 'buildPath', 'pointAt',
   'computeGrid', 'pointToCell', 'cellKey',
+  'cellsBetween',
 ];
 // Names not yet implemented come back undefined rather than crashing the
 // harness, so the red phase of each task fails as a test rather than a stack trace.
@@ -220,6 +221,74 @@ test('cellKey distinguishes cells and is stable', () => {
   assert(core.cellKey(3, 7) === core.cellKey(3, 7), 'stable');
   assert(core.cellKey(3, 7) !== core.cellKey(7, 3), 'distinguishes');
   assert(core.cellKey(-1, 2) !== core.cellKey(1, 2), 'handles negatives');
+});
+
+test('cellsBetween returns nothing for an empty or reversed range', () => {
+  const p = core.buildPath(core.OUTLINE);
+  const g = core.computeGrid(1400, 900);
+  assert(core.cellsBetween(p, g, 0.3, 0.3).length === 0, 'empty range');
+  assert(core.cellsBetween(p, g, 0.5, 0.2).length === 0, 'reversed range');
+});
+
+test('cellsBetween returns cells in travel order with no repeats in a call', () => {
+  const p = core.buildPath(core.OUTLINE);
+  const g = core.computeGrid(1400, 900);
+  const cells = core.cellsBetween(p, g, 0, 0.25);
+  assert(cells.length > 40, 'a quarter of the contour is many cells, got ' + cells.length);
+  const seen = new Set();
+  for (const c of cells) {
+    assert(!seen.has(c.key), 'repeated cell in one call: ' + c.key);
+    seen.add(c.key);
+    assert(c.key === core.cellKey(c.cx, c.cy), 'key must match coordinates');
+  }
+});
+
+test('consecutive cells from one call are adjacent, never skipping a gap', () => {
+  const p = core.buildPath(core.OUTLINE);
+  const g = core.computeGrid(1400, 900);
+  const cells = core.cellsBetween(p, g, 0, 1);
+  for (let i = 1; i < cells.length; i++) {
+    const dx = Math.abs(cells[i].cx - cells[i - 1].cx);
+    const dy = Math.abs(cells[i].cy - cells[i - 1].cy);
+    assert(dx <= 1 && dy <= 1,
+      'gap between ' + cells[i - 1].key + ' and ' + cells[i].key);
+  }
+});
+
+test('a full traversal covers the whole contour', () => {
+  const p = core.buildPath(core.OUTLINE);
+  const g = core.computeGrid(1400, 900);
+  const cells = core.cellsBetween(p, g, 0, 1);
+  assert(cells.length > 300 && cells.length < 360,
+    'expected roughly 326 cells, got ' + cells.length);
+});
+
+test('many small frames cover exactly the same cells as one big call', () => {
+  const p = core.buildPath(core.OUTLINE);
+  const g = core.computeGrid(1400, 900);
+  const whole = new Set(core.cellsBetween(p, g, 0, 1).map(c => c.key));
+  const stepped = new Set();
+  const frames = 18000;
+  for (let i = 0; i < frames; i++) {
+    for (const c of core.cellsBetween(p, g, i / frames, (i + 1) / frames)) {
+      stepped.add(c.key);
+    }
+  }
+  assert(whole.size === stepped.size,
+    'whole=' + whole.size + ' stepped=' + stepped.size);
+  for (const k of whole) assert(stepped.has(k), 'frame-by-frame missed ' + k);
+});
+
+// Review Focus 5: after completion the sperm keeps moving but the trail stops.
+test('cellsBetween clamps at completion so the trail stops growing', () => {
+  const p = core.buildPath(core.OUTLINE);
+  const g = core.computeGrid(1400, 900);
+  const clamped = core.cellsBetween(p, g, 0.99, 1.4).map(c => c.key);
+  const exact = core.cellsBetween(p, g, 0.99, 1).map(c => c.key);
+  assert(clamped.length === exact.length, 'overshoot added cells');
+  for (let i = 0; i < exact.length; i++) assert(clamped[i] === exact[i], 'cell ' + i);
+  assert(core.cellsBetween(p, g, 1, 1.5).length === 0, 'past completion must be empty');
+  assert(core.cellsBetween(p, g, 2.2, 2.7).length === 0, 'second lap must be empty');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

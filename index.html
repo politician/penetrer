@@ -143,6 +143,37 @@ function pointToCell(grid, x, y) {
 function cellKey(cx, cy) {
   return cx + ',' + cy;
 }
+
+// --- cells crossed ----------------------------------------------------------
+// Samples the contour finely enough that no cell can be stepped over, so the
+// line is continuous however small a frame's advance was. Both ends clamp to
+// [0,1]: the sperm keeps travelling after one full lap, but the trail does not
+// grow past completion.
+function cellsBetween(path, grid, fromT, toT) {
+  const start = Math.min(Math.max(fromT, 0), 1);
+  const end = Math.min(Math.max(toT, 0), 1);
+  if (end <= start) return [];
+  // Sample points sit on one fixed lattice around the whole loop, four per
+  // cell, and a range takes the lattice points that fall inside it. Subdividing
+  // each range separately instead would shift the sample positions with the
+  // range, so drawing the contour in thousands of small frames would graze a
+  // slightly different set of cells than one whole-range call -- and the
+  // repaint after a resize would silently differ from what was on screen.
+  const samples = Math.max(1, Math.ceil(path.totalLength * grid.unitsToCells * 4));
+  const first = Math.ceil(start * samples);
+  const last = Math.floor(end * samples);
+  const cells = [];
+  const seen = new Set();
+  for (let i = first; i <= last; i++) {
+    const p = pointAt(path, i / samples);
+    const c = pointToCell(grid, p[0], p[1]);
+    const key = cellKey(c.cx, c.cy);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cells.push({ cx: c.cx, cy: c.cy, key });
+  }
+  return cells;
+}
 </script>
 
 <script id="app">
