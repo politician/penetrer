@@ -109,6 +109,40 @@ function pointAt(path, t) {
   const b = path.points[(lo + 1) % path.points.length];
   return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
 }
+
+// --- viewport grid ----------------------------------------------------------
+// Cell size is limited by both viewport dimensions, so a narrow or portrait
+// window scales the drawing down rather than cropping it.
+function computeGrid(viewportW, viewportH) {
+  const cellsWide = Math.ceil(DESIGN_W * CELLS_TALL / DESIGN_H);
+  const cell = Math.min(
+    viewportH * FILL_FRACTION / CELLS_TALL,
+    viewportW * FILL_FRACTION / cellsWide
+  );
+  const drawW = cell * cellsWide;
+  const drawH = cell * CELLS_TALL;
+  return {
+    cell,
+    cellsWide,
+    cellsTall: CELLS_TALL,
+    originX: (viewportW - drawW) / 2,
+    originY: (viewportH - drawH) / 2,
+    unitsToCells: CELLS_TALL / DESIGN_H,
+  };
+}
+
+// Cell coordinates depend only on the design point, never on the viewport, so
+// the same drawing repaints identically at any size.
+function pointToCell(grid, x, y) {
+  return {
+    cx: Math.floor(x * grid.unitsToCells),
+    cy: Math.floor(y * grid.unitsToCells),
+  };
+}
+
+function cellKey(cx, cy) {
+  return cx + ',' + cy;
+}
 </script>
 
 <script id="app">

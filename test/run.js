@@ -14,6 +14,7 @@ const EXPORTS = [
   'DURATION_1X', 'MAX_DELTA', 'HOT_SECONDS',
   'advance',
   'arcPoints', 'OUTLINE', 'buildPath', 'pointAt',
+  'computeGrid', 'pointToCell', 'cellKey',
 ];
 // Names not yet implemented come back undefined rather than crashing the
 // harness, so the red phase of each task fails as a test rather than a stack trace.
@@ -161,6 +162,64 @@ test('arc length is distributed evenly: halfway around is halfway along', () => 
     prev = cur;
   }
   close(walked, p.totalLength / 2, p.totalLength * 0.002);
+});
+
+test('the drawing is CELLS_TALL cells tall and fills FILL_FRACTION of a wide viewport', () => {
+  const g = core.computeGrid(1400, 900);
+  close(g.cell * g.cellsTall, 900 * core.FILL_FRACTION, 1e-9, 'drawing height');
+  assert(g.cellsTall === core.CELLS_TALL, 'cellsTall');
+  assert(g.cellsWide === 86, 'expected 86 cells wide, got ' + g.cellsWide);
+});
+
+test('the drawing is centred in the viewport', () => {
+  const g = core.computeGrid(1400, 900);
+  const drawW = g.cell * g.cellsWide, drawH = g.cell * g.cellsTall;
+  close(g.originX, (1400 - drawW) / 2, 1e-9, 'originX');
+  close(g.originY, (900 - drawH) / 2, 1e-9, 'originY');
+});
+
+// Review Focus 3: a narrow window must not crop the drawing horizontally.
+test('a narrow viewport sizes the drawing by width so it never overflows', () => {
+  const g = core.computeGrid(300, 2000);
+  const drawW = g.cell * g.cellsWide, drawH = g.cell * g.cellsTall;
+  assert(drawW <= 300 * core.FILL_FRACTION + 1e-9, 'width overflows: ' + drawW);
+  assert(drawH <= 2000 * core.FILL_FRACTION + 1e-9, 'height overflows: ' + drawH);
+  assert(g.originX >= 0 && g.originY >= 0, 'origin went negative');
+});
+
+test('a tiny viewport still yields a usable cell size', () => {
+  const g = core.computeGrid(120, 80);
+  assert(g.cell > 0, 'cell size must be positive, got ' + g.cell);
+  assert(Number.isFinite(g.originX) && Number.isFinite(g.originY), 'origin must be finite');
+});
+
+test('pointToCell floors onto the cell grid, including exact boundaries', () => {
+  const g = core.computeGrid(1400, 900);
+  const unit = 1 / g.unitsToCells; // design units per cell
+  assert(core.pointToCell(g, 0, 0).cx === 0, 'origin cell');
+  assert(core.pointToCell(g, unit * 3, unit * 7).cx === 3, 'boundary lands in the higher cell');
+  assert(core.pointToCell(g, unit * 3, unit * 7).cy === 7, 'boundary lands in the higher cell');
+  assert(core.pointToCell(g, unit * 3 - 1e-9, 0).cx === 2, 'just below the boundary');
+});
+
+// Review Focus 4: a resize must repaint the identical shape.
+test('cell identity is independent of viewport size', () => {
+  const a = core.computeGrid(1400, 900);
+  const b = core.computeGrid(800, 600);
+  const c = core.computeGrid(300, 2000);
+  for (const [x, y] of core.OUTLINE) {
+    const ca = core.pointToCell(a, x, y);
+    const cb = core.pointToCell(b, x, y);
+    const cc = core.pointToCell(c, x, y);
+    assert(ca.cx === cb.cx && ca.cy === cb.cy, 'differs between 1400x900 and 800x600');
+    assert(ca.cx === cc.cx && ca.cy === cc.cy, 'differs between 1400x900 and 300x2000');
+  }
+});
+
+test('cellKey distinguishes cells and is stable', () => {
+  assert(core.cellKey(3, 7) === core.cellKey(3, 7), 'stable');
+  assert(core.cellKey(3, 7) !== core.cellKey(7, 3), 'distinguishes');
+  assert(core.cellKey(-1, 2) !== core.cellKey(1, 2), 'handles negatives');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
