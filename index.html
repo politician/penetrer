@@ -7,11 +7,38 @@
 <style>
 html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 canvas { position: fixed; inset: 0; display: block; }
+#controls {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2;
+  display: flex;
+  gap: 14px;
+  font: 14px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#controls button {
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: #fff;
+  opacity: 0.5;
+  cursor: pointer;
+}
+#controls button.active { opacity: 1; }
+body.hide-cursor, body.hide-cursor #controls button { cursor: none; }
 </style>
 </head>
 <body>
 <canvas id="trail"></canvas>
 <canvas id="fg"></canvas>
+
+<div id="controls">
+  <button type="button" data-speed="1" class="active">1x</button>
+  <button type="button" data-speed="3">3x</button>
+  <button type="button" data-speed="5">5x</button>
+</div>
 
 <script id="core">
 // Pure logic. No DOM, no timers, no globals from the page.
@@ -347,6 +374,39 @@ function frame(now) {
 
 rebuild();
 requestAnimationFrame(frame);
+
+const controls = document.getElementById('controls');
+
+// Changing speed takes effect from this moment on; progress is untouched, so
+// the drawing continues from where the sperm is rather than restarting.
+controls.addEventListener('click', (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  speed = Number(button.dataset.speed);
+  for (const b of controls.querySelectorAll('button')) {
+    b.classList.toggle('active', b === button);
+  }
+});
+
+// A page cannot enter fullscreen on its own, so any click outside the controls
+// asks for it: open the page, click once, walk away.
+document.addEventListener('click', (event) => {
+  if (event.target.closest('#controls')) return;
+  if (document.fullscreenElement) return;
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+});
+
+let cursorTimer = null;
+function pokeCursor() {
+  document.body.classList.remove('hide-cursor');
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => document.body.classList.add('hide-cursor'), 2000);
+}
+document.addEventListener('mousemove', pokeCursor);
+pokeCursor();
+
+window.addEventListener('resize', rebuild);
 </script>
 </body>
 </html>
