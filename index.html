@@ -50,7 +50,23 @@ const CELLS_TALL = 120;      // drawing height in grid cells
 const FILL_FRACTION = 0.85;  // fraction of the viewport the drawing occupies
 const DURATION_1X = 300;     // seconds for one full traversal at 1x
 const MAX_DELTA = 0.1;       // seconds; clamp so a backgrounded tab resumes
-const HOT_SECONDS = 1.5;     // how long a freshly filled cell stays bright
+
+// The sperm is drawn on top of the cells it has just filled, so how far the hot
+// edge reaches decides whether it can be seen at all.
+const HEAD_RADIUS_CELLS = 2.2;                  // solid head ellipse, in cells
+const HEAD_GLOW_CELLS = HEAD_RADIUS_CELLS * 3;  // soft glow around the head
+// Freshness is counted in cells, not seconds. At 1x the contour advances about
+// one cell per second, so the spec's 1.5-second window would keep only ~1.6
+// cells hot -- entirely underneath the head, which alone covers
+// HEAD_RADIUS_CELLS. Counting cells makes the leading edge the same length, and
+// visible clear of the head, at every speed.
+const HOT_CELLS = 12;
+
+// How hot a filled cell is, given how many cells were filled after it.
+function hotHeat(rank) {
+  if (rank < 0 || rank >= HOT_CELLS) return 0;
+  return 1 - rank / HOT_CELLS;
+}
 
 // Advance the progress cursor. delta is wall-clock seconds since the previous
 // frame, clamped so a backgrounded tab resumes rather than fast-forwarding, and
@@ -278,16 +294,17 @@ function rebuild() {
 
 // The settled trail is already pure white, so a fresh cell cannot be painted
 // brighter than its neighbours -- white over white is a no-op. A fresh cell is
-// made to glow instead: a soft halo around it that fades over HOT_SECONDS,
+// made to glow instead: a soft halo that fades over the last HOT_CELLS filled,
 // leaving the line itself pure white as the spec requires.
-function drawHot(nowSec) {
-  hot = hot.filter(h => nowSec - h.born < HOT_SECONDS);
+function drawHot() {
   if (!hot.length) return;
   const radius = grid.cell * 2.5;
   fgCtx.save();
   fgCtx.globalCompositeOperation = 'lighter';
-  for (const h of hot) {
-    const heat = 1 - (nowSec - h.born) / HOT_SECONDS;
+  for (let i = 0; i < hot.length; i++) {
+    const h = hot[i];
+    const heat = hotHeat(hot.length - 1 - i);
+    if (heat <= 0) continue;
     const x = grid.originX + (h.cx + 0.5) * grid.cell;
     const y = grid.originY + (h.cy + 0.5) * grid.cell;
     const halo = fgCtx.createRadialGradient(x, y, 0, x, y, radius);
@@ -335,14 +352,15 @@ function drawSperm(nowSec) {
   }
 
   const head = pts[0];
-  const r = grid.cell * 2.2;
-  const glow = fgCtx.createRadialGradient(head[0], head[1], 0, head[0], head[1], r * 3);
+  const r = grid.cell * HEAD_RADIUS_CELLS;
+  const glowRadius = grid.cell * HEAD_GLOW_CELLS;
+  const glow = fgCtx.createRadialGradient(head[0], head[1], 0, head[0], head[1], glowRadius);
   glow.addColorStop(0, 'rgba(255,255,255,0.9)');
   glow.addColorStop(0.25, 'rgba(255,255,255,0.4)');
   glow.addColorStop(1, 'rgba(255,255,255,0)');
   fgCtx.fillStyle = glow;
   fgCtx.beginPath();
-  fgCtx.arc(head[0], head[1], r * 3, 0, Math.PI * 2);
+  fgCtx.arc(head[0], head[1], glowRadius, 0, Math.PI * 2);
   fgCtx.fill();
   fgCtx.fillStyle = '#ffffff';
   fgCtx.beginPath();
@@ -362,11 +380,12 @@ function frame(now) {
     if (filled.has(c.key)) continue;
     filled.add(c.key);
     paintCell(trailCtx, c.cx, c.cy, '#ffffff');
-    hot.push({ cx: c.cx, cy: c.cy, born: nowSec });
+    hot.push({ cx: c.cx, cy: c.cy });
+    if (hot.length > HOT_CELLS) hot.shift();
   }
 
   fgCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-  drawHot(nowSec);
+  drawHot();
   drawSperm(nowSec);
 
   requestAnimationFrame(frame);

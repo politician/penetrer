@@ -11,7 +11,8 @@ if (!match) {
 
 const EXPORTS = [
   'DESIGN_W', 'DESIGN_H', 'CELLS_TALL', 'FILL_FRACTION',
-  'DURATION_1X', 'MAX_DELTA', 'HOT_SECONDS',
+  'DURATION_1X', 'MAX_DELTA',
+  'HEAD_RADIUS_CELLS', 'HEAD_GLOW_CELLS', 'HOT_CELLS', 'hotHeat',
   'advance',
   'arcPoints', 'OUTLINE', 'buildPath', 'pointAt',
   'computeGrid', 'pointToCell', 'cellKey',
@@ -289,6 +290,30 @@ test('cellsBetween clamps at completion so the trail stops growing', () => {
   for (let i = 0; i < exact.length; i++) assert(clamped[i] === exact[i], 'cell ' + i);
   assert(core.cellsBetween(p, g, 1, 1.5).length === 0, 'past completion must be empty');
   assert(core.cellsBetween(p, g, 2.2, 2.7).length === 0, 'second lap must be empty');
+});
+
+// The hot leading edge must be visible at 1x, which is the default and the only
+// speed the spec headlines. Ranking hotness by seconds hides it under the sperm.
+test('the hot leading edge reaches past the sperm head at the default speed', () => {
+  const cellsInContour = 326;
+  const reachIfTimeBased = (cellsInContour / core.DURATION_1X) * 1.5;
+  assert(reachIfTimeBased < core.HEAD_RADIUS_CELLS,
+    'premise: a 1.5s window reaches ' + reachIfTimeBased.toFixed(2) +
+    ' cells at 1x, inside the solid head at ' + core.HEAD_RADIUS_CELLS);
+  assert(core.HOT_CELLS > core.HEAD_GLOW_CELLS,
+    'hot edge must extend past the head glow (' + core.HEAD_GLOW_CELLS +
+    ' cells), got ' + core.HOT_CELLS);
+});
+
+test('hotHeat fades from full to nothing across the hot window', () => {
+  close(core.hotHeat(0), 1, 1e-12, 'the newest cell is fully hot');
+  assert(core.hotHeat(core.HOT_CELLS - 1) > 0, 'the oldest hot cell still glows');
+  assert(core.hotHeat(core.HOT_CELLS) === 0, 'one past the window is cold');
+  assert(core.hotHeat(999) === 0, 'far past the window is cold');
+  assert(core.hotHeat(-1) === 0, 'a negative rank is cold, not brighter than full');
+  for (let r = 1; r < core.HOT_CELLS; r++) {
+    assert(core.hotHeat(r) < core.hotHeat(r - 1), 'fade is monotonic at rank ' + r);
+  }
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
