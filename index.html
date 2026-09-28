@@ -177,7 +177,176 @@ function cellsBetween(path, grid, fromT, toT) {
 </script>
 
 <script id="app">
-// DOM, canvas and animation.
+const trailCanvas = document.getElementById('trail');
+const fgCanvas = document.getElementById('fg');
+
+const path = buildPath(OUTLINE);
+let grid = null;
+let trailCtx = null;
+let fgCtx = null;
+let progress = 0;
+let speed = 1;
+let lastTime = null;
+const filled = new Set();
+let hot = [];
+
+const TAIL_UNITS = 26;      // how far behind the head the tail reaches
+const TAIL_SEGMENTS = 26;
+// The tail is drawn over the trail it just laid down, in the same white, so it
+// only reads as a tail where it swings clear of the line. Amplitude is set in
+// design units large enough that the swing is several line-widths wide, and the
+// wave is kept to roughly two cycles so it whips like a flagellum instead of
+// buzzing.
+const TAIL_AMPLITUDE = 3.2;
+const TAIL_WAVELENGTH = 0.45;
+const TAIL_SPEED = 7;
+
+// Back the canvas with device pixels so cells have crisp edges on a HiDPI
+// screen, then work in CSS pixels for everything else.
+function sizeCanvas(canvas, w, h) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function paintCell(ctx, cx, cy, style) {
+  ctx.fillStyle = style;
+  ctx.fillRect(
+    grid.originX + cx * grid.cell,
+    grid.originY + cy * grid.cell,
+    grid.cell + 0.5, // half-pixel overlap so neighbours leave no hairline seam
+    grid.cell + 0.5
+  );
+}
+
+function toScreen(p) {
+  return [
+    grid.originX + p[0] * grid.unitsToCells * grid.cell,
+    grid.originY + p[1] * grid.unitsToCells * grid.cell,
+  ];
+}
+
+// Recompute everything that depends on viewport size and repaint the trail from
+// the path itself. Progress is a fraction, so the drawing is reproduced exactly.
+function rebuild() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  grid = computeGrid(w, h);
+  trailCtx = sizeCanvas(trailCanvas, w, h);
+  fgCtx = sizeCanvas(fgCanvas, w, h);
+  filled.clear();
+  hot = [];
+  trailCtx.clearRect(0, 0, w, h);
+  for (const c of cellsBetween(path, grid, 0, progress)) {
+    if (filled.has(c.key)) continue;
+    filled.add(c.key);
+    paintCell(trailCtx, c.cx, c.cy, '#ffffff');
+  }
+}
+
+// The settled trail is already pure white, so a fresh cell cannot be painted
+// brighter than its neighbours -- white over white is a no-op. A fresh cell is
+// made to glow instead: a soft halo around it that fades over HOT_SECONDS,
+// leaving the line itself pure white as the spec requires.
+function drawHot(nowSec) {
+  hot = hot.filter(h => nowSec - h.born < HOT_SECONDS);
+  if (!hot.length) return;
+  const radius = grid.cell * 2.5;
+  fgCtx.save();
+  fgCtx.globalCompositeOperation = 'lighter';
+  for (const h of hot) {
+    const heat = 1 - (nowSec - h.born) / HOT_SECONDS;
+    const x = grid.originX + (h.cx + 0.5) * grid.cell;
+    const y = grid.originY + (h.cy + 0.5) * grid.cell;
+    const halo = fgCtx.createRadialGradient(x, y, 0, x, y, radius);
+    halo.addColorStop(0, 'rgba(255,255,255,' + (0.5 * heat) + ')');
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    fgCtx.fillStyle = halo;
+    fgCtx.beginPath();
+    fgCtx.arc(x, y, radius, 0, Math.PI * 2);
+    fgCtx.fill();
+  }
+  fgCtx.restore();
+}
+
+// The tail is sampled from the path behind the head and pushed sideways by a
+// travelling sine wave, so it always follows the line the sperm is drawing.
+function drawSperm(nowSec) {
+  const stepT = (TAIL_UNITS / TAIL_SEGMENTS) / path.totalLength;
+  const pts = [];
+  for (let i = 0; i <= TAIL_SEGMENTS; i++) {
+    const t = progress - i * stepT;
+    const p = pointAt(path, t);
+    const ahead = pointAt(path, t + stepT * 0.5);
+    const behind = pointAt(path, t - stepT * 0.5);
+    const dx = ahead[0] - behind[0];
+    const dy = ahead[1] - behind[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const ratio = i / TAIL_SEGMENTS;
+    const wave = Math.sin(nowSec * TAIL_SPEED - i * TAIL_WAVELENGTH)
+      * TAIL_AMPLITUDE * ratio;
+    pts.push(toScreen([p[0] + (-dy / len) * wave, p[1] + (dx / len) * wave]));
+  }
+
+  // The widest part of the swing is near the tip, so brightness and width taper
+  // gently rather than to nothing: a tail that faded out linearly would be
+  // invisible exactly where it swings clear of the trail and could be seen.
+  fgCtx.lineCap = 'round';
+  for (let i = 0; i < pts.length - 1; i++) {
+    const taper = 1 - (i / pts.length) * 0.75;
+    fgCtx.beginPath();
+    fgCtx.moveTo(pts[i][0], pts[i][1]);
+    fgCtx.lineTo(pts[i + 1][0], pts[i + 1][1]);
+    fgCtx.lineWidth = Math.max(1, grid.cell * 0.8 * taper);
+    fgCtx.strokeStyle = 'rgba(255,255,255,' + (0.95 * taper) + ')';
+    fgCtx.stroke();
+  }
+
+  const head = pts[0];
+  const r = grid.cell * 2.2;
+  const glow = fgCtx.createRadialGradient(head[0], head[1], 0, head[0], head[1], r * 3);
+  glow.addColorStop(0, 'rgba(255,255,255,0.9)');
+  glow.addColorStop(0.25, 'rgba(255,255,255,0.4)');
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  fgCtx.fillStyle = glow;
+  fgCtx.beginPath();
+  fgCtx.arc(head[0], head[1], r * 3, 0, Math.PI * 2);
+  fgCtx.fill();
+  fgCtx.fillStyle = '#ffffff';
+  fgCtx.beginPath();
+  fgCtx.ellipse(head[0], head[1], r, r * 0.72, 0, 0, Math.PI * 2);
+  fgCtx.fill();
+}
+
+function frame(now) {
+  const nowSec = now / 1000;
+  const delta = lastTime === null ? 0 : nowSec - lastTime;
+  lastTime = nowSec;
+
+  const previous = progress;
+  progress = advance(progress, delta, speed);
+
+  for (const c of cellsBetween(path, grid, previous, progress)) {
+    if (filled.has(c.key)) continue;
+    filled.add(c.key);
+    paintCell(trailCtx, c.cx, c.cy, '#ffffff');
+    hot.push({ cx: c.cx, cy: c.cy, born: nowSec });
+  }
+
+  fgCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  drawHot(nowSec);
+  drawSperm(nowSec);
+
+  requestAnimationFrame(frame);
+}
+
+rebuild();
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
