@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>swim</title>
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+canvas { position: fixed; inset: 0; display: block; }
+#controls {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2;
+  display: flex;
+  gap: 14px;
+  font: 14px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#controls button {
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: #fff;
+  opacity: 0.5;
+  cursor: pointer;
+}
+#controls button.active { opacity: 1; }
+body.hide-cursor, body.hide-cursor #controls button { cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="trail"></canvas>
+<canvas id="fg"></canvas>
+
+<div id="controls">
+  <button type="button" data-speed="1" class="active">1x</button>
+  <button type="button" data-speed="3">3x</button>
+  <button type="button" data-speed="5">5x</button>
+</div>
+
+<script id="core">
+// Pure logic. No DOM, no timers, no globals from the page.
+// Everything in this block is extracted and unit-tested by test/run.js.
+
+const DESIGN_W = 100;        // design-space width
+const DESIGN_H = 140;        // design-space height, y increases downward
+const CELLS_TALL = 120;      // drawing height in grid cells
+const FILL_FRACTION = 0.85;  // fraction of the viewport the drawing occupies
+const DURATION_1X = 300;     // seconds for one full traversal at 1x
+const MAX_DELTA = 0.1;       // seconds; clamp so a backgrounded tab resumes
+
+// The sperm is drawn on top of the cells it has just filled, so how far the hot
+// edge reaches decides whether it can be seen at all.
+const HEAD_RADIUS_CELLS = 2.2;                  // solid head ellipse, in cells
+const HEAD_GLOW_CELLS = HEAD_RADIUS_CELLS * 3;  // soft glow around the head
+// Freshness is counted in cells, not seconds. At 1x the contour advances about
+// one cell per second, so the spec's 1.5-second window would keep only ~1.6
+// cells hot -- entirely underneath the head, which alone covers
+// HEAD_RADIUS_CELLS. Counting cells makes the leading edge the same length, and
+// visible clear of the head, at every speed.
+const HOT_CELLS = 12;
+
+// How hot a filled cell is, given how many cells were filled after it.
+function hotHeat(rank) {
+  if (rank < 0 || rank >= HOT_CELLS) return 0;
+  return 1 - rank / HOT_CELLS;
+}
+
+// Advance the progress cursor. delta is wall-clock seconds since the previous
+// frame, clamped so a backgrounded tab resumes rather than fast-forwarding, and
+// floored at zero so progress never runs backwards.
+function advance(progress, delta, speed) {
+  const d = Math.min(Math.max(delta, 0), MAX_DELTA);
+  return progress + (d * speed) / DURATION_1X;
+}
+
+// --- outline geometry -------------------------------------------------------
+// Angles are degrees counter-clockwise from the positive x axis, with y running
+// downward, so clockwise-on-screen means the angle decreases.
+function arcPoints(cx, cy, r, startDeg, endDeg) {
+  const sweepLength = Math.abs(endDeg - startDeg) * Math.PI / 180 * r;
+  const steps = Math.max(2, Math.ceil(sweepLength * 2)); // ~2 points per design unit
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (startDeg + (endDeg - startDeg) * (i / steps)) * Math.PI / 180;
+    pts.push([cx + r * Math.cos(a), cy - r * Math.sin(a)]);
+  }
+  return pts;
+}
+
+const HEAD = { cx: 50, cy: 24, r: 16 };
+const SHAFT_TOP = 24;
+const SHAFT_BOTTOM = 88;
+const RIGHT_BALL = { cx: 66, cy: 108, r: 20 };
+const LEFT_BALL = { cx: 34, cy: 108, r: 20 };
+// The two ball circles are 32 apart with radius 20, so they intersect at
+// (50, 96) and (50, 120). The lower intersection is the notch between them.
+const NOTCH_RIGHT_DEG = -143.13; // (50,120) as seen from RIGHT_BALL
+const NOTCH_LEFT_DEG = -36.87;   // (50,120) as seen from LEFT_BALL
+
+// One closed contour, traced clockwise from the top of the head: over the right
+// of the head, down the right of the shaft, around the right ball, up into the
+// notch, around the left ball, up the left of the shaft, over the left of the
+// head, back to the start.
+const OUTLINE = [].concat(
+  arcPoints(HEAD.cx, HEAD.cy, HEAD.r, 90, 0),
+  [[RIGHT_BALL.cx, SHAFT_BOTTOM]],
+  arcPoints(RIGHT_BALL.cx, RIGHT_BALL.cy, RIGHT_BALL.r, 90, NOTCH_RIGHT_DEG),
+  arcPoints(LEFT_BALL.cx, LEFT_BALL.cy, LEFT_BALL.r, NOTCH_LEFT_DEG, -270),
+  [[LEFT_BALL.cx, SHAFT_TOP]],
+  arcPoints(HEAD.cx, HEAD.cy, HEAD.r, 180, 90)
+);
+
+// --- arc-length path --------------------------------------------------------
+// Joins between sections repeat a point, and the final arc lands back on the
+// first point, so both are stripped before measuring.
+function buildPath(points) {
+  const pts = [];
+  for (const p of points) {
+    const last = pts[pts.length - 1];
+    if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 1e-9) pts.push(p);
+  }
+  while (pts.length > 1) {
+    const first = pts[0], last = pts[pts.length - 1];
+    if (Math.hypot(first[0] - last[0], first[1] - last[1]) <= 1e-9) pts.pop();
+    else break;
+  }
+  const cumulative = [0];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    cumulative.push(cumulative[i] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+  }
+  return { points: pts, cumulative, totalLength: cumulative[pts.length] };
+}
+
+// Position a fraction t of the way around the loop. t wraps, so t=1 equals t=0
+// and negative values are valid (the tail uses them).
+function pointAt(path, t) {
+  const frac = t - Math.floor(t);
+  const target = frac * path.totalLength;
+  const cum = path.cumulative;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] <= target) lo = mid; else hi = mid;
+  }
+  const segLength = cum[lo + 1] - cum[lo];
+  const u = segLength > 1e-12 ? (target - cum[lo]) / segLength : 0;
+  const a = path.points[lo];
+  const b = path.points[(lo + 1) % path.points.length];
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+}
+
+// --- viewport grid ----------------------------------------------------------
+// Cell size is limited by both viewport dimensions, so a narrow or portrait
+// window scales the drawing down rather than cropping it.
+function computeGrid(viewportW, viewportH) {
+  const cellsWide = Math.ceil(DESIGN_W * CELLS_TALL / DESIGN_H);
+  const cell = Math.min(
+    viewportH * FILL_FRACTION / CELLS_TALL,
+    viewportW * FILL_FRACTION / cellsWide
+  );
+  const drawW = cell * cellsWide;
+  const drawH = cell * CELLS_TALL;
+  return {
+    cell,
+    cellsWide,
+    cellsTall: CELLS_TALL,
+    originX: (viewportW - drawW) / 2,
+    originY: (viewportH - drawH) / 2,
+    unitsToCells: CELLS_TALL / DESIGN_H,
+  };
+}
+
+// Cell coordinates depend only on the design point, never on the viewport, so
+// the same drawing repaints identically at any size.
+function pointToCell(grid, x, y) {
+  return {
+    cx: Math.floor(x * grid.unitsToCells),
+    cy: Math.floor(y * grid.unitsToCells),
+  };
+}
+
+function cellKey(cx, cy) {
+  return cx + ',' + cy;
+}
+
+// --- cells crossed ----------------------------------------------------------
+// Samples the contour finely enough that no cell can be stepped over, so the
+// line is continuous however small a frame's advance was. Both ends clamp to
+// [0,1]: the sperm keeps travelling after one full lap, but the trail does not
+// grow past completion.
+function cellsBetween(path, grid, fromT, toT) {
+  const start = Math.min(Math.max(fromT, 0), 1);
+  const end = Math.min(Math.max(toT, 0), 1);
+  if (end <= start) return [];
+  // Sample points sit on one fixed lattice around the whole loop, four per
+  // cell, and a range takes the lattice points that fall inside it. Subdividing
+  // each range separately instead would shift the sample positions with the
+  // range, so drawing the contour in thousands of small frames would graze a
+  // slightly different set of cells than one whole-range call -- and the
+  // repaint after a resize would silently differ from what was on screen.
+  const samples = Math.max(1, Math.ceil(path.totalLength * grid.unitsToCells * 4));
+  const first = Math.ceil(start * samples);
+  const last = Math.floor(end * samples);
+  const cells = [];
+  const seen = new Set();
+  for (let i = first; i <= last; i++) {
+    const p = pointAt(path, i / samples);
+    const c = pointToCell(grid, p[0], p[1]);
+    const key = cellKey(c.cx, c.cy);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cells.push({ cx: c.cx, cy: c.cy, key });
+  }
+  return cells;
+}
+</script>
+
+<script id="app">
+const trailCanvas = document.getElementById('trail');
+const fgCanvas = document.getElementById('fg');
+
+const path = buildPath(OUTLINE);
+let grid = null;
+let trailCtx = null;
+let fgCtx = null;
+let progress = 0;
+let speed = 1;
+let lastTime = null;
+const filled = new Set();
+let hot = [];
+
+const TAIL_UNITS = 26;      // how far behind the head the tail reaches
+const TAIL_SEGMENTS = 26;
+// The tail is drawn over the trail it just laid down, in the same white, so it
+// only reads as a tail where it swings clear of the line. Amplitude is set in
+// design units large enough that the swing is several line-widths wide, and the
+// wave is kept to roughly two cycles so it whips like a flagellum instead of
+// buzzing.
+const TAIL_AMPLITUDE = 3.2;
+const TAIL_WAVELENGTH = 0.45;
+const TAIL_SPEED = 7;
+
+// Back the canvas with device pixels so cells have crisp edges on a HiDPI
+// screen, then work in CSS pixels for everything else.
+function sizeCanvas(canvas, w, h) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function paintCell(ctx, cx, cy, style) {
+  ctx.fillStyle = style;
+  ctx.fillRect(
+    grid.originX + cx * grid.cell,
+    grid.originY + cy * grid.cell,
+    grid.cell + 0.5, // half-pixel overlap so neighbours leave no hairline seam
+    grid.cell + 0.5
+  );
+}
+
+function toScreen(p) {
+  return [
+    grid.originX + p[0] * grid.unitsToCells * grid.cell,
+    grid.originY + p[1] * grid.unitsToCells * grid.cell,
+  ];
+}
+
+// Recompute everything that depends on viewport size and repaint the trail from
+// the path itself. Progress is a fraction, so the drawing is reproduced exactly.
+function rebuild() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  grid = computeGrid(w, h);
+  trailCtx = sizeCanvas(trailCanvas, w, h);
+  fgCtx = sizeCanvas(fgCanvas, w, h);
+  filled.clear();
+  hot = [];
+  trailCtx.clearRect(0, 0, w, h);
+  for (const c of cellsBetween(path, grid, 0, progress)) {
+    if (filled.has(c.key)) continue;
+    filled.add(c.key);
+    paintCell(trailCtx, c.cx, c.cy, '#ffffff');
+  }
+}
+
+// The settled trail is already pure white, so a fresh cell cannot be painted
+// brighter than its neighbours -- white over white is a no-op. A fresh cell is
+// made to glow instead: a soft halo that fades over the last HOT_CELLS filled,
+// leaving the line itself pure white as the spec requires.
+function drawHot() {
+  if (!hot.length) return;
+  const radius = grid.cell * 2.5;
+  fgCtx.save();
+  fgCtx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < hot.length; i++) {
+    const h = hot[i];
+    const heat = hotHeat(hot.length - 1 - i);
+    if (heat <= 0) continue;
+    const x = grid.originX + (h.cx + 0.5) * grid.cell;
+    const y = grid.originY + (h.cy + 0.5) * grid.cell;
+    const halo = fgCtx.createRadialGradient(x, y, 0, x, y, radius);
+    halo.addColorStop(0, 'rgba(255,255,255,' + (0.5 * heat) + ')');
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    fgCtx.fillStyle = halo;
+    fgCtx.beginPath();
+    fgCtx.arc(x, y, radius, 0, Math.PI * 2);
+    fgCtx.fill();
+  }
+  fgCtx.restore();
+}
+
+// The tail is sampled from the path behind the head and pushed sideways by a
+// travelling sine wave, so it always follows the line the sperm is drawing.
+function drawSperm(nowSec) {
+  const stepT = (TAIL_UNITS / TAIL_SEGMENTS) / path.totalLength;
+  const pts = [];
+  for (let i = 0; i <= TAIL_SEGMENTS; i++) {
+    const t = progress - i * stepT;
+    const p = pointAt(path, t);
+    const ahead = pointAt(path, t + stepT * 0.5);
+    const behind = pointAt(path, t - stepT * 0.5);
+    const dx = ahead[0] - behind[0];
+    const dy = ahead[1] - behind[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const ratio = i / TAIL_SEGMENTS;
+    const wave = Math.sin(nowSec * TAIL_SPEED - i * TAIL_WAVELENGTH)
+      * TAIL_AMPLITUDE * ratio;
+    pts.push(toScreen([p[0] + (-dy / len) * wave, p[1] + (dx / len) * wave]));
+  }
+
+  // The widest part of the swing is near the tip, so brightness and width taper
+  // gently rather than to nothing: a tail that faded out linearly would be
+  // invisible exactly where it swings clear of the trail and could be seen.
+  fgCtx.lineCap = 'round';
+  for (let i = 0; i < pts.length - 1; i++) {
+    const taper = 1 - (i / pts.length) * 0.75;
+    fgCtx.beginPath();
+    fgCtx.moveTo(pts[i][0], pts[i][1]);
+    fgCtx.lineTo(pts[i + 1][0], pts[i + 1][1]);
+    fgCtx.lineWidth = Math.max(1, grid.cell * 0.8 * taper);
+    fgCtx.strokeStyle = 'rgba(255,255,255,' + (0.95 * taper) + ')';
+    fgCtx.stroke();
+  }
+
+  const head = pts[0];
+  const r = grid.cell * HEAD_RADIUS_CELLS;
+  const glowRadius = grid.cell * HEAD_GLOW_CELLS;
+  const glow = fgCtx.createRadialGradient(head[0], head[1], 0, head[0], head[1], glowRadius);
+  glow.addColorStop(0, 'rgba(255,255,255,0.9)');
+  glow.addColorStop(0.25, 'rgba(255,255,255,0.4)');
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  fgCtx.fillStyle = glow;
+  fgCtx.beginPath();
+  fgCtx.arc(head[0], head[1], glowRadius, 0, Math.PI * 2);
+  fgCtx.fill();
+  fgCtx.fillStyle = '#ffffff';
+  fgCtx.beginPath();
+  fgCtx.ellipse(head[0], head[1], r, r * 0.72, 0, 0, Math.PI * 2);
+  fgCtx.fill();
+}
+
+function frame(now) {
+  const nowSec = now / 1000;
+  const delta = lastTime === null ? 0 : nowSec - lastTime;
+  lastTime = nowSec;
+
+  const previous = progress;
+  progress = advance(progress, delta, speed);
+
+  for (const c of cellsBetween(path, grid, previous, progress)) {
+    if (filled.has(c.key)) continue;
+    filled.add(c.key);
+    paintCell(trailCtx, c.cx, c.cy, '#ffffff');
+    hot.push({ cx: c.cx, cy: c.cy });
+    if (hot.length > HOT_CELLS) hot.shift();
+  }
+
+  fgCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  drawHot();
+  drawSperm(nowSec);
+
+  requestAnimationFrame(frame);
+}
+
+rebuild();
+requestAnimationFrame(frame);
+
+const controls = document.getElementById('controls');
+
+// Changing speed takes effect from this moment on; progress is untouched, so
+// the drawing continues from where the sperm is rather than restarting.
+controls.addEventListener('click', (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  speed = Number(button.dataset.speed);
+  for (const b of controls.querySelectorAll('button')) {
+    b.classList.toggle('active', b === button);
+  }
+});
+
+// A page cannot enter fullscreen on its own, so any click outside the controls
+// asks for it: open the page, click once, walk away.
+document.addEventListener('click', (event) => {
+  if (event.target.closest('#controls')) return;
+  if (document.fullscreenElement) return;
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+});
+
+let cursorTimer = null;
+function pokeCursor() {
+  document.body.classList.remove('hide-cursor');
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => document.body.classList.add('hide-cursor'), 2000);
+}
+document.addEventListener('mousemove', pokeCursor);
+pokeCursor();
+
+window.addEventListener('resize', rebuild);
+</script>
+</body>
+</html>
