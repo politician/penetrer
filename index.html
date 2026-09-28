@@ -32,6 +32,83 @@ function advance(progress, delta, speed) {
   const d = Math.min(Math.max(delta, 0), MAX_DELTA);
   return progress + (d * speed) / DURATION_1X;
 }
+
+// --- outline geometry -------------------------------------------------------
+// Angles are degrees counter-clockwise from the positive x axis, with y running
+// downward, so clockwise-on-screen means the angle decreases.
+function arcPoints(cx, cy, r, startDeg, endDeg) {
+  const sweepLength = Math.abs(endDeg - startDeg) * Math.PI / 180 * r;
+  const steps = Math.max(2, Math.ceil(sweepLength * 2)); // ~2 points per design unit
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (startDeg + (endDeg - startDeg) * (i / steps)) * Math.PI / 180;
+    pts.push([cx + r * Math.cos(a), cy - r * Math.sin(a)]);
+  }
+  return pts;
+}
+
+const HEAD = { cx: 50, cy: 24, r: 16 };
+const SHAFT_TOP = 24;
+const SHAFT_BOTTOM = 88;
+const RIGHT_BALL = { cx: 66, cy: 108, r: 20 };
+const LEFT_BALL = { cx: 34, cy: 108, r: 20 };
+// The two ball circles are 32 apart with radius 20, so they intersect at
+// (50, 96) and (50, 120). The lower intersection is the notch between them.
+const NOTCH_RIGHT_DEG = -143.13; // (50,120) as seen from RIGHT_BALL
+const NOTCH_LEFT_DEG = -36.87;   // (50,120) as seen from LEFT_BALL
+
+// One closed contour, traced clockwise from the top of the head: over the right
+// of the head, down the right of the shaft, around the right ball, up into the
+// notch, around the left ball, up the left of the shaft, over the left of the
+// head, back to the start.
+const OUTLINE = [].concat(
+  arcPoints(HEAD.cx, HEAD.cy, HEAD.r, 90, 0),
+  [[RIGHT_BALL.cx, SHAFT_BOTTOM]],
+  arcPoints(RIGHT_BALL.cx, RIGHT_BALL.cy, RIGHT_BALL.r, 90, NOTCH_RIGHT_DEG),
+  arcPoints(LEFT_BALL.cx, LEFT_BALL.cy, LEFT_BALL.r, NOTCH_LEFT_DEG, -270),
+  [[LEFT_BALL.cx, SHAFT_TOP]],
+  arcPoints(HEAD.cx, HEAD.cy, HEAD.r, 180, 90)
+);
+
+// --- arc-length path --------------------------------------------------------
+// Joins between sections repeat a point, and the final arc lands back on the
+// first point, so both are stripped before measuring.
+function buildPath(points) {
+  const pts = [];
+  for (const p of points) {
+    const last = pts[pts.length - 1];
+    if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 1e-9) pts.push(p);
+  }
+  while (pts.length > 1) {
+    const first = pts[0], last = pts[pts.length - 1];
+    if (Math.hypot(first[0] - last[0], first[1] - last[1]) <= 1e-9) pts.pop();
+    else break;
+  }
+  const cumulative = [0];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    cumulative.push(cumulative[i] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+  }
+  return { points: pts, cumulative, totalLength: cumulative[pts.length] };
+}
+
+// Position a fraction t of the way around the loop. t wraps, so t=1 equals t=0
+// and negative values are valid (the tail uses them).
+function pointAt(path, t) {
+  const frac = t - Math.floor(t);
+  const target = frac * path.totalLength;
+  const cum = path.cumulative;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] <= target) lo = mid; else hi = mid;
+  }
+  const segLength = cum[lo + 1] - cum[lo];
+  const u = segLength > 1e-12 ? (target - cum[lo]) / segLength : 0;
+  const a = path.points[lo];
+  const b = path.points[(lo + 1) % path.points.length];
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+}
 </script>
 
 <script id="app">
