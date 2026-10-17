@@ -1,0 +1,24 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; color: #f1f7e8; background: #101b13; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; min-height: 100dvh; overflow: hidden; }
+video, canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+video { object-fit: cover; transform: scaleX(-1); }
+canvas { pointer-events: none; }
+header, footer { position: fixed; z-index: 2; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: 24px max(24px, env(safe-area-inset-right)) 24px max(24px, env(safe-area-inset-left)); gap: 16px; }
+header { top: 0; padding-top: max(24px, env(safe-area-inset-top)); background: linear-gradient(#0008, transparent); font-size: 12px; letter-spacing: .16em; }
+header a { color: inherit; text-decoration: none; font-size: 26px; }
+footer { bottom: 0; padding-bottom: max(24px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, #000a); font-size: 13px; }
+#welcome { position: absolute; inset: 0; margin: auto; width: min(500px, calc(100% - 48px)); height: fit-content; max-height: calc(100dvh - 180px); overflow: auto; text-align: center; }
+.vegetable { font-size: 64px; transform: rotate(-24deg); }
+.eyebrow { font-size: 11px; letter-spacing: .2em; color: #b9df81; }
+h1 { font-size: clamp(30px, 6vw, 48px); line-height: 1.08; letter-spacing: -.05em; margin: 20px 0; }
+#welcome p:not(.eyebrow) { color: #bfcbbb; line-height: 1.6; max-width: 360px; margin: 0 auto 24px; }
+button { border: 1px solid #f1f7e840; border-radius: 999px; background: #142019cc; color: inherit; padding: 12px 18px; font: inherit; cursor: pointer; }
+button:hover { background: #2e4432; }
+button:focus-visible, a:focus-visible { outline: 3px solid #c4f58e; outline-offset: 4px; }
+button:disabled { opacity: .6; cursor: wait; }
+#start { background: #c4f58e; color: #17230e; font-weight: 650; padding: 16px 28px; }
+small { display: block; color: #9ba996; font-size: 11px; line-height: 1.6; margin-top: 20px; }
+.controls { display: flex; flex-shrink: 0; gap: 8px; }
+[hidden] { display: none !important; }
+@media (max-width: 520px) { header, footer { padding-left: 16px; padding-right: 16px; } footer { flex-wrap: wrap; gap: 4px; } footer p { width: 100%; } button { font-size: 12px; } }
