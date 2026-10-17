@@ -110,15 +110,18 @@
           end('Mouth tracking stopped. Start the camera to retry.');
           return;
         }
-        const activeIds = new Set(targets.map(target => target.id));
+        const activeIds = new Set(targets.filter(target => target.open).map(target => target.id));
         particles = particles.filter(p => activeIds.has(p.targetId));
-        say(targets.length ? `Garden incoming! ${targets.length} ${targets.length === 1 ? 'mouth' : 'mouths'} detected.` : 'Looking for faces — face the camera in good light.');
+        say(targets.length ? (activeIds.size
+          ? `Garden incoming! ${activeIds.size} open ${activeIds.size === 1 ? 'mouth' : 'mouths'}.`
+          : 'Open your mouth to invite the zucchini.') : 'Looking for faces — face the camera in good light.');
       }
-      if (targets.length) {
+      const openTargets = targets.filter(target => target.open);
+      if (openTargets.length) {
         spawnTime += dt;
         // Give every mouth its own stream and budget so no one is starved.
         while (spawnTime >= .08) {
-          for (const target of targets) {
+          for (const target of openTargets) {
             if (particles.filter(p => p.targetId === target.id).length < 32) spawn(target.id);
           }
           spawnTime -= .08;
@@ -130,6 +133,8 @@
           return target && CamMath.moveParticle(p, target, dt);
         });
         particles.forEach(drawZucchini);
+      } else {
+        spawnTime = 0;
       }
     }
     frameId = requestAnimationFrame(frame);
@@ -201,3 +206,4 @@
   resize();
   begin();
 })();
+

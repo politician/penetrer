@@ -13,6 +13,11 @@ face[13] = { x: .5, y: .55 }; face[14] = { x: .5, y: .65 };
 face[61] = { x: .4, y: .6 }; face[291] = { x: .6, y: .6 };
 const mouth = mouthTarget(face, 1000, 1000, 1000, 1000);
 assert.equal(mouth.x, 500); assert.equal(mouth.y, 600); assert.equal(mouth.radius, 50);
+assert.ok(Math.abs(mouth.openness - .5) < 1e-10);
+const closedFace = face.map(point => ({ ...point }));
+closedFace[13] = closedFace[14] = { x: .5, y: .6 };
+assert.equal(mouthTarget(closedFace, 1000, 1000, 360, 640).openness, 0);
+assert.ok(Math.abs(mouthTarget(face, 1000, 1000, 360, 640).openness - .5) < 1e-10);
 assert.equal(moveParticle({ x: 0, y: 0, speed: 1000 }, { x: 40, y: 0, radius: 5 }, .05), false);
 assert.equal(moveParticle({ x: 0, y: 0, speed: 100 }, { x: 0, y: 0, radius: 5 }, 0), false);
 const particle = { x: 0, y: 0, speed: 100 };
@@ -31,6 +36,15 @@ assert.deepEqual(joined.targets.map(t => t.id), [0, 2], 'new people receive a fr
 assert.equal(matchTargets(joined.targets, [], joined.nextId).targets.length, 0);
 const crowded = matchTargets([], Array.from({ length: 8 }, (_, i) => ({ x: i * 100, y: 100, radius: 10 })), 0);
 assert.equal(new Set(crowded.targets.map(t => t.id)).size, 8);
+let gate = matchTargets([], [{ ...mouth, openness: .1 }], 0);
+assert.equal(gate.targets[0].open, false);
+gate = matchTargets(gate.targets, [{ ...mouth, openness: .2 }], gate.nextId);
+assert.equal(gate.targets[0].open, true);
+gate = matchTargets(gate.targets, [{ ...mouth, openness: .15 }], gate.nextId);
+assert.equal(gate.targets[0].open, true, 'small measurement changes should not flicker');
+gate = matchTargets(gate.targets, [{ ...mouth, openness: .1 }], gate.nextId);
+assert.equal(gate.targets[0].open, false);
+assert.equal(matchTargets([], [{ ...mouth, openness: .15 }], 0).targets[0].open, false);
 
 // Exercise browser lifecycle without a physical camera or network models.
 const app = fs.readFileSync(path.join(__dirname, '../cam/app.js'), 'utf8')
@@ -115,15 +129,25 @@ async function run() {
   assert.equal(e.start.hidden, true);
   Object.assign(e.camera, { readyState: 2, videoWidth: 1000, videoHeight: 1000 });
   e.tick(200); e.tick(260);
-  assert.match(e.status.textContent, /2 mouths detected/);
+  assert.match(e.status.textContent, /2 open mouths/);
   assert.equal(e.draws.length, 2, 'each detected mouth receives a zucchini');
-  visibleFaces = [];
+  visibleFaces = [closedFace, face];
   e.draws.length = 0;
   e.tick(320);
+  assert.match(e.status.textContent, /1 open mouth/);
+  assert.equal(e.draws.length, 1, 'closing one mouth removes only its zucchini');
+  visibleFaces = [closedFace, closedFace];
+  e.draws.length = 0;
+  e.tick(380);
+  assert.match(e.status.textContent, /Open your mouth/);
+  assert.equal(e.draws.length, 0, 'closed mouths have no zucchini');
+  visibleFaces = [];
+  e.draws.length = 0;
+  e.tick(440);
   assert.equal(e.draws.length, 0, 'lost faces remove their particles');
   visibleFaces = [face];
-  e.tick(380); e.tick(440);
-  assert.match(e.status.textContent, /1 mouth detected/);
+  e.tick(500); e.tick(560);
+  assert.match(e.status.textContent, /1 open mouth/);
   assert.ok(e.draws.length > 0, 'newly detected mouths start receiving zucchini');
   e.stop.events.click();
   assert.equal(activeStream.track.stopped, true);
@@ -132,3 +156,4 @@ async function run() {
   console.log('Camera autostart, multi-mouth animation, geometry, collision, permission errors, cancellation and cleanup passed.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });
+
