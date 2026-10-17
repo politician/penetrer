@@ -13,8 +13,10 @@ function mouthTarget(landmarks, videoW, videoH, width, height) {
   const b = screenPoint(landmarks[14], videoW, videoH, width, height);
   const left = screenPoint(landmarks[61], videoW, videoH, width, height);
   const right = screenPoint(landmarks[291], videoW, videoH, width, height);
+  const mouthWidth = Math.hypot(left.x - right.x, left.y - right.y);
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
-    radius: Math.max(9, Math.hypot(left.x - right.x, left.y - right.y) * .25) };
+    radius: Math.max(9, mouthWidth * .25),
+    openness: mouthWidth > 0 ? Math.hypot(a.x - b.x, a.y - b.y) / mouthWidth : 0 };
 }
 
 // Swept arrival check prevents fast particles stepping past the mouth.
@@ -47,9 +49,12 @@ function matchTargets(previous, mouths, nextId) {
   }
   const targets = mouths.map((mouth, index) => ({
     ...mouth, id: matched.get(index)?.id ?? nextId++,
+    // Two thresholds avoid flickering when lips hover near the open boundary.
+    open: mouth.openness >= (matched.get(index)?.open ? .12 : .18),
   }));
   return { targets, nextId };
 }
 
 const CamMath = { screenPoint, mouthTarget, moveParticle, matchTargets };
 if (typeof module !== 'undefined') module.exports = CamMath;
+
