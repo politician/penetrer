@@ -26,6 +26,7 @@ jobs:
       # No dependencies to install: the suite extracts the page's own core
       # script block and asserts against it.
       - run: node test/run.js
+      - run: node test/cam.js
 
   deploy:
     needs: test
@@ -35,15 +36,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # Publish the page and its domain file only. The design spec, the
+      # Publish the pages, camera assets and domain file only. The design spec, the
       # implementation plan and the test suite stay in the repo and never
       # reach penetrer.com.
       - name: Assemble the site
         run: |
           mkdir -p _site
           cp index.html CNAME _site/
+          cp -R cam _site/cam
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
+
