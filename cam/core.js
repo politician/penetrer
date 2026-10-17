@@ -32,6 +32,24 @@ function moveParticle(particle, target, dt) {
   return true;
 }
 
+// Once released, a zucchini keeps falling even if the mouth reopens.
+function updateParticle(particle, target, dt, viewportHeight) {
+  if (!particle.falling && target?.open) return moveParticle(particle, target, dt);
+  const delta = Math.min(Math.max(dt, 0), .05);
+  if (!particle.falling) {
+    particle.falling = true;
+    particle.vx = Math.cos(particle.angle) * particle.speed;
+    particle.vy = Math.sin(particle.angle) * particle.speed;
+    particle.spin = particle.vx >= 0 ? 2 : -2;
+  }
+  const gravity = 1100;
+  particle.x += particle.vx * delta;
+  particle.y += particle.vy * delta + .5 * gravity * delta * delta;
+  particle.vy += gravity * delta;
+  particle.angle += particle.spin * delta;
+  return particle.y <= viewportHeight + 100 || particle.vy < 0;
+}
+
 // Face detection order can change between frames. Match nearby mouths one to
 // one so existing particles keep following the same person when that happens.
 function matchTargets(previous, mouths, nextId) {
@@ -55,6 +73,6 @@ function matchTargets(previous, mouths, nextId) {
   return { targets, nextId };
 }
 
-const CamMath = { screenPoint, mouthTarget, moveParticle, matchTargets };
+const CamMath = { screenPoint, mouthTarget, moveParticle, updateParticle, matchTargets };
 if (typeof module !== 'undefined') module.exports = CamMath;
 

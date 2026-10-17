@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-46 -22 92 44" width="92" height="44">
+  <title>Cartoon zucchini</title>
+  <!-- Edit this file to change the artwork. Keep the vegetable pointing right.
+       The viewBox is centered so animation rotation works without code changes. -->
+  <path d="M31-6 C11-16-16-20-30-10 C-44 0-32 18-16 15 C4 14 17 5 31 6 Q38 0 31-6Z"
+        fill="#69a942" stroke="#183921" stroke-width="2.5"/>
+  <g fill="none" stroke="#b5d56b" stroke-width="2" stroke-linecap="round">
+    <path d="M-29-4 Q-9-10 25-1"/>
+    <path d="M-25 7 Q-7 9 20 3"/>
+  </g>
+  <path d="M-41-4 h11 v6 h-11Z" fill="#427435"/>
+  <circle cx="34" cy="0" r="3" fill="#e6c45c"/>
+</svg>

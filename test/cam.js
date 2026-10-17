@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { screenPoint, mouthTarget, moveParticle, matchTargets } = require('../cam/core.js');
+const { screenPoint, mouthTarget, moveParticle, updateParticle, matchTargets } = require('../cam/core.js');
 
 assert.deepEqual(screenPoint({ x: .25, y: .5 }, 1280, 720, 1280, 720), { x: 960, y: 360 });
 assert.deepEqual(screenPoint({ x: .5, y: .5 }, 1280, 720, 360, 640), { x: 180, y: 320 });
@@ -23,6 +23,23 @@ assert.equal(moveParticle({ x: 0, y: 0, speed: 100 }, { x: 0, y: 0, radius: 5 },
 const particle = { x: 0, y: 0, speed: 100 };
 assert.equal(moveParticle(particle, { x: 200, y: 0, radius: 5 }, 60), true);
 assert.equal(particle.x, 5); // A resumed tab cannot jump sixty seconds ahead.
+const released = { x: 100, y: 100, angle: 0, speed: 200, scale: .8 };
+assert.equal(updateParticle(released, { open: false }, .05, 640), true);
+assert.equal(released.falling, true);
+assert.ok(released.y > 100, 'closed mouths release zucchini under gravity');
+assert.equal(released.vx, 200, 'falling preserves incoming momentum');
+assert.equal(released.scale, .8, 'falling artwork must not vanish by shrinking');
+const yAfterRelease = released.y;
+updateParticle(released, { open: true, x: 0, y: 0, radius: 5 }, .05, 640);
+assert.ok(released.y > yAfterRelease, 'reopening does not recapture falling zucchini');
+let alive = true;
+for (let i = 0; i < 100 && alive; i++) alive = updateParticle(released, undefined, .05, 640);
+assert.equal(alive, false, 'falling zucchini are removed after leaving the screen');
+const lost = { x: 100, y: 100, angle: 0, speed: 200, scale: 1 };
+assert.equal(updateParticle(lost, undefined, .05, 640), true);
+assert.equal(lost.falling, true, 'lost faces release zucchini too');
+assert.equal(updateParticle({ x: 0, y: 0, speed: 100 }, { open: true, x: 0, y: 0, radius: 5 }, .05, 640), false,
+  'arrival at an open mouth still consumes the zucchini');
 
 const mouths = [{ x: 100, y: 100, radius: 10 }, { x: 400, y: 100, radius: 10 }];
 const first = matchTargets([], mouths, 0);
@@ -50,7 +67,7 @@ assert.equal(matchTargets([], [{ ...mouth, openness: .15 }], 0).targets[0].open,
 const app = fs.readFileSync(path.join(__dirname, '../cam/app.js'), 'utf8')
   .replace('import(VISION_URL)', 'loadVision()')
   .replace('  begin();\n})();', '  return begin();\n})();');
-function harness(getUserMedia, loadVision) {
+function harness(getUserMedia, loadVision, imageFails = false) {
   const elements = {};
   for (const id of ['camera', 'overlay', 'start', 'stop', 'fullscreen', 'status']) {
     elements[id] = { hidden: false, disabled: false, textContent: '', events: {},
@@ -66,6 +83,7 @@ function harness(getUserMedia, loadVision) {
   });
   elements.overlay.getContext = () => drawingContext;
   const context = {
+    Image: class { async decode() { if (imageFails) throw new Error('missing SVG'); } },
     CamMath: require('../cam/core.js'),
     document: { getElementById: id => elements[id], documentElement: {}, addEventListener() {} },
     window: { isSecureContext: true, innerWidth: 360, innerHeight: 640, addEventListener() {} },
@@ -102,6 +120,12 @@ async function run() {
   assert.equal(stream.track.stopped, true);
   assert.match(e.status.textContent, /Could not load mouth tracking/);
 
+  const artworkStream = fakeStream();
+  e = harness(async () => artworkStream, undefined, true);
+  await e.ready;
+  assert.match(e.status.textContent, /Could not load zucchini.svg/);
+  assert.equal(artworkStream.track.stopped, true);
+
   let resolveModel, closeCount = 0;
   const modelPending = new Promise(resolve => { resolveModel = resolve; });
   e = harness(async () => fakeStream(), async () => ({
@@ -131,22 +155,27 @@ async function run() {
   e.tick(200); e.tick(260);
   assert.match(e.status.textContent, /2 open mouths/);
   assert.equal(e.draws.length, 2, 'each detected mouth receives a zucchini');
-  visibleFaces = [closedFace, face];
+  visibleFaces = [closedFace, face.map(point => ({ x: point.x - .25, y: point.y }))];
   e.draws.length = 0;
   e.tick(320);
   assert.match(e.status.textContent, /1 open mouth/);
-  assert.equal(e.draws.length, 1, 'closing one mouth removes only its zucchini');
+  assert.equal(e.draws.length, 2, 'closing one mouth keeps its falling zucchini visible');
   visibleFaces = [closedFace, closedFace];
   e.draws.length = 0;
   e.tick(380);
   assert.match(e.status.textContent, /Open your mouth/);
-  assert.equal(e.draws.length, 0, 'closed mouths have no zucchini');
+  assert.equal(e.draws.length, 2, 'existing zucchini keep falling when all mouths close');
   visibleFaces = [];
   e.draws.length = 0;
   e.tick(440);
-  assert.equal(e.draws.length, 0, 'lost faces remove their particles');
+  assert.equal(e.draws.length, 2, 'lost faces also keep their falling zucchini');
+  for (let i = 1; i <= 80; i++) {
+    e.draws.length = 0;
+    e.tick(440 + i * 50);
+  }
+  assert.equal(e.draws.length, 0, 'fallen zucchini eventually leave the screen');
   visibleFaces = [face];
-  e.tick(500); e.tick(560);
+  e.tick(4500); e.tick(4560);
   assert.match(e.status.textContent, /1 open mouth/);
   assert.ok(e.draws.length > 0, 'newly detected mouths start receiving zucchini');
   e.stop.events.click();
