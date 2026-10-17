@@ -8,6 +8,8 @@
   const stop = document.getElementById('stop');
   const fullscreen = document.getElementById('fullscreen');
   const status = document.getElementById('status');
+  const zucchiniImage = new Image();
+  zucchiniImage.src = './zucchini.svg';
   const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
   const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
   const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -60,30 +62,13 @@
     });
   }
 
-  // A curved green vegetable with a stem, blossom and pale garden stripes.
+  // The artwork lives in zucchini.svg; replacing it needs no animation edits.
   function drawZucchini(p) {
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.angle);
     ctx.scale(p.size * p.scale, p.size * p.scale);
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = '#183921';
-    ctx.fillStyle = '#69a942';
-    ctx.beginPath();
-    ctx.moveTo(31, -6);
-    ctx.bezierCurveTo(11, -16, -16, -20, -30, -10);
-    ctx.bezierCurveTo(-44, 0, -32, 18, -16, 15);
-    ctx.bezierCurveTo(4, 14, 17, 5, 31, 6);
-    ctx.quadraticCurveTo(38, 0, 31, -6);
-    ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = '#b5d56b';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(-29, -4); ctx.quadraticCurveTo(-9, -10, 25, -1); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-25, 7); ctx.quadraticCurveTo(-7, 9, 20, 3); ctx.stroke();
-    ctx.fillStyle = '#427435';
-    ctx.fillRect(-41, -4, 11, 6);
-    ctx.fillStyle = '#e6c45c';
-    ctx.beginPath(); ctx.arc(34, 0, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.drawImage(zucchiniImage, -46, -22, 92, 44);
     ctx.restore();
   }
 
@@ -111,7 +96,6 @@
           return;
         }
         const activeIds = new Set(targets.filter(target => target.open).map(target => target.id));
-        particles = particles.filter(p => activeIds.has(p.targetId));
         say(targets.length ? (activeIds.size
           ? `Garden incoming! ${activeIds.size} open ${activeIds.size === 1 ? 'mouth' : 'mouths'}.`
           : 'Open your mouth to invite the zucchini.') : 'Looking for faces — face the camera in good light.');
@@ -122,20 +106,17 @@
         // Give every mouth its own stream and budget so no one is starved.
         while (spawnTime >= .08) {
           for (const target of openTargets) {
-            if (particles.filter(p => p.targetId === target.id).length < 32) spawn(target.id);
+            if (particles.length < 512 && particles.filter(p => p.targetId === target.id).length < 32) spawn(target.id);
           }
           spawnTime -= .08;
         }
         spawnTime = Math.min(spawnTime, .08);
-        const byId = new Map(targets.map(target => [target.id, target]));
-        particles = particles.filter(p => {
-          const target = byId.get(p.targetId);
-          return target && CamMath.moveParticle(p, target, dt);
-        });
-        particles.forEach(drawZucchini);
       } else {
         spawnTime = 0;
       }
+      const byId = new Map(targets.map(target => [target.id, target]));
+      particles = particles.filter(p => CamMath.updateParticle(p, byId.get(p.targetId), dt, height));
+      particles.forEach(drawZucchini);
     }
     frameId = requestAnimationFrame(frame);
   }
@@ -162,6 +143,14 @@
       video.srcObject = stream;
       await video.play();
       if (session !== generation) return;
+      try {
+        await zucchiniImage.decode();
+      } catch (_) {
+        const error = new Error('Could not load zucchini.svg. Reload the page to retry.');
+        error.name = 'ArtworkError';
+        throw error;
+      }
+      if (session !== generation) return;
       say('Loading mouth tracking…');
       const { FaceLandmarker, FilesetResolver } = await import(VISION_URL);
       if (session !== generation) return;
@@ -182,6 +171,7 @@
     } catch (error) {
       if (session !== generation) return;
       const messages = {
+        ArtworkError: error.message,
         NotAllowedError: 'Camera permission was denied. Allow camera access in your browser, then retry.',
         NotFoundError: 'No camera found. Connect a camera, then retry.',
         NotReadableError: 'Camera is busy. Close other apps using it, then retry.',
