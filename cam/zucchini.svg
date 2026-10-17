@@ -1,13 +1,113 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-46 -22 92 44" width="92" height="44">
-  <title>Cartoon zucchini</title>
-  <!-- Edit this file to change the artwork. Keep the vegetable pointing right.
-       The viewBox is centered so animation rotation works without code changes. -->
-  <path d="M31-6 C11-16-16-20-30-10 C-44 0-32 18-16 15 C4 14 17 5 31 6 Q38 0 31-6Z"
-        fill="#69a942" stroke="#183921" stroke-width="2.5"/>
-  <g fill="none" stroke="#b5d56b" stroke-width="2" stroke-linecap="round">
-    <path d="M-29-4 Q-9-10 25-1"/>
-    <path d="M-25 7 Q-7 9 20 3"/>
-  </g>
-  <path d="M-41-4 h11 v6 h-11Z" fill="#427435"/>
-  <circle cx="34" cy="0" r="3" fill="#e6c45c"/>
+
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512" height="512"
+     viewBox="0 0 512 512">
+  <!-- Base -->
+  <path
+    d="M174 309
+       C132 315 105 349 105 392
+       C105 441 143 480 192 480
+       C218 480 231 464 256 464
+       C281 464 294 480 320 480
+       C369 480 407 441 407 392
+       C407 349 380 315 338 309 Z"
+    fill="#EFC392"
+    stroke="#000"
+    stroke-width="10"
+    stroke-linejoin="round"/>
+
+  <!-- Base shadow -->
+  <path
+    d="M338 315
+       C359 335 370 361 370 392
+       C370 432 344 462 311 474
+       C358 480 402 442 402 392
+       C402 353 376 323 338 315 Z"
+    fill="#E4B483"/>
+
+  <!-- Shaft -->
+  <path
+    d="M179 145
+       C164 208 162 279 186 353
+       M333 145
+       C348 208 350 279 326 353"
+    fill="none"
+    stroke="#000"
+    stroke-width="11"
+    stroke-linecap="round"/>
+
+  <path
+    d="M179 146
+       C164 208 162 279 186 353
+       L326 353
+       C350 279 348 208 333 146 Z"
+    fill="#EFC392"/>
+
+  <!-- Shaft shadow -->
+  <path
+    d="M300 150
+       L332 150
+       C346 214 344 283 325 350
+       C309 353 302 341 306 326
+       C320 256 315 193 300 150 Z"
+    fill="#E4B483"/>
+
+  <!-- Shaft outline -->
+  <path
+    d="M179 146
+       C164 208 162 279 186 353
+       M333 146
+       C348 208 350 279 326 353"
+    fill="none"
+    stroke="#000"
+    stroke-width="10"
+    stroke-linecap="round"/>
+
+  <!-- Head -->
+  <path
+    d="M196 150
+       C183 150 173 140 173 126
+       L173 115
+       C173 70 210 33 256 33
+       C302 33 339 70 339 115
+       L339 126
+       C339 140 329 150 316 150 Z"
+    fill="#FFA5A5"
+    stroke="#000"
+    stroke-width="10"
+    stroke-linejoin="round"/>
+
+  <!-- Head shading -->
+  <path
+    d="M264 38
+       C292 57 308 85 308 117
+       L308 127
+       C308 135 305 142 299 146
+       L316 146
+       C327 146 334 138 334 126
+       L334 115
+       C334 76 304 44 264 38 Z"
+    fill="#F99595"/>
+
+  <!-- Central line -->
+  <path
+    d="M256 34 L256 63"
+    stroke="#000"
+    stroke-width="10"
+    stroke-linecap="round"/>
+
+  <!-- Highlights -->
+  <path
+    d="M205 86 Q215 69 232 61"
+    fill="none"
+    stroke="#FFD0D0"
+    stroke-width="11"
+    stroke-linecap="round"/>
+
+  <path
+    d="M197 110 L197 115"
+    fill="none"
+    stroke="#FFD0D0"
+    stroke-width="10"
+    stroke-linecap="round"/>
 </svg>
