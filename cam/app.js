@@ -4,7 +4,6 @@
   const video = document.getElementById('camera');
   const canvas = document.getElementById('overlay');
   const ctx = canvas.getContext('2d');
-  const welcome = document.getElementById('welcome');
   const start = document.getElementById('start');
   const stop = document.getElementById('stop');
   const fullscreen = document.getElementById('fullscreen');
@@ -13,7 +12,8 @@
   const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
   const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
   let stream = null, detector = null, frameId = 0, generation = 0;
-  let running = false, particles = [], target = null;
+  const MAX_FACES = 8;
+  let running = false, particles = [], targets = [], nextTargetId = 0;
   let lastFrame = 0, lastDetection = 0, lastVideoTime = -1, spawnTime = 0;
   let width = 0, height = 0;
 
@@ -26,7 +26,7 @@
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     particles = [];
-    target = null;
+    targets = [];
     lastVideoTime = -1;
   }
 
@@ -40,18 +40,19 @@
     if (detector) detector.close();
     detector = null;
     particles = [];
-    target = null;
+    targets = [];
     ctx.clearRect(0, 0, width, height);
-    welcome.hidden = false;
+    start.hidden = false;
     stop.hidden = true;
     start.disabled = false;
     start.textContent = 'Start camera';
     say(message);
   }
 
-  function spawn() {
+  function spawn(targetId) {
     const side = Math.floor(Math.random() * 4);
     particles.push({
+      targetId,
       x: side === 0 ? -70 : side === 1 ? width + 70 : Math.random() * width,
       y: side === 2 ? -70 : side === 3 ? height + 70 : Math.random() * height,
       speed: 210 + Math.random() * 170,
@@ -92,7 +93,7 @@
     lastFrame = now;
     ctx.clearRect(0, 0, width, height);
     if (document.hidden) {
-      target = null;
+      targets = [];
       particles = [];
     } else {
       // Limit inference to ~20fps, and never process the same camera frame twice.
@@ -100,28 +101,44 @@
         lastDetection = now;
         lastVideoTime = video.currentTime;
         try {
-          const face = detector.detectForVideo(video, now).faceLandmarks[0];
-          target = face ? CamMath.mouthTarget(face, video.videoWidth, video.videoHeight, width, height) : null;
+          const mouths = detector.detectForVideo(video, now).faceLandmarks.map(face =>
+            CamMath.mouthTarget(face, video.videoWidth, video.videoHeight, width, height));
+          const matched = CamMath.matchTargets(targets, mouths, nextTargetId);
+          targets = matched.targets;
+          nextTargetId = matched.nextId;
         } catch (_) {
           end('Mouth tracking stopped. Start the camera to retry.');
           return;
         }
-        if (!target) particles = [];
-        say(target ? 'Garden incoming! Move your head to guide it.' : 'Looking for your face — face the camera in good light.');
+        const activeIds = new Set(targets.map(target => target.id));
+        particles = particles.filter(p => activeIds.has(p.targetId));
+        say(targets.length ? `Garden incoming! ${targets.length} ${targets.length === 1 ? 'mouth' : 'mouths'} detected.` : 'Looking for faces — face the camera in good light.');
       }
-      if (target) {
+      if (targets.length) {
         spawnTime += dt;
-        while (spawnTime >= .08 && particles.length < 64) { spawn(); spawnTime -= .08; }
+        // Give every mouth its own stream and budget so no one is starved.
+        while (spawnTime >= .08) {
+          for (const target of targets) {
+            if (particles.filter(p => p.targetId === target.id).length < 32) spawn(target.id);
+          }
+          spawnTime -= .08;
+        }
         spawnTime = Math.min(spawnTime, .08);
-        particles = particles.filter(p => CamMath.moveParticle(p, target, dt));
+        const byId = new Map(targets.map(target => [target.id, target]));
+        particles = particles.filter(p => {
+          const target = byId.get(p.targetId);
+          return target && CamMath.moveParticle(p, target, dt);
+        });
         particles.forEach(drawZucchini);
       }
     }
     frameId = requestAnimationFrame(frame);
   }
 
-  start.addEventListener('click', async () => {
+  async function begin() {
+    if (running || start.disabled) return;
     const session = ++generation;
+    start.hidden = true;
     start.disabled = true;
     start.textContent = 'Starting…';
     stop.hidden = false;
@@ -146,17 +163,16 @@
       const vision = await FilesetResolver.forVisionTasks(WASM_URL);
       if (session !== generation) return;
       const loaded = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: MODEL_URL }, runningMode: 'VIDEO', numFaces: 1,
+        baseOptions: { modelAssetPath: MODEL_URL }, runningMode: 'VIDEO', numFaces: MAX_FACES,
       });
       if (session !== generation) { loaded.close(); return; }
       detector = loaded;
       running = true;
-      welcome.hidden = true;
       lastFrame = performance.now();
       lastDetection = 0;
       lastVideoTime = -1;
       spawnTime = 0;
-      say('Looking for your face — face the camera in good light.');
+      say('Looking for faces — face the camera in good light.');
       frameId = requestAnimationFrame(frame);
     } catch (error) {
       if (session !== generation) return;
@@ -167,7 +183,8 @@
       };
       end(messages[error.name] || (stream ? 'Could not load mouth tracking. Check your connection and retry.' : error.message));
     }
-  });
+  }
+  start.addEventListener('click', begin);
   stop.addEventListener('click', () => end());
   fullscreen.hidden = !document.documentElement.requestFullscreen;
   fullscreen.addEventListener('click', async () => {
@@ -182,4 +199,5 @@
   window.addEventListener('resize', resize);
   window.addEventListener('pagehide', () => end());
   resize();
+  begin();
 })();

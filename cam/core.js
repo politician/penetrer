@@ -30,5 +30,26 @@ function moveParticle(particle, target, dt) {
   return true;
 }
 
-const CamMath = { screenPoint, mouthTarget, moveParticle };
+// Face detection order can change between frames. Match nearby mouths one to
+// one so existing particles keep following the same person when that happens.
+function matchTargets(previous, mouths, nextId) {
+  const pairs = [];
+  previous.forEach(old => mouths.forEach((mouth, index) => {
+    const distance = Math.hypot(old.x - mouth.x, old.y - mouth.y);
+    if (distance <= Math.max(120, old.radius * 6)) pairs.push({ old, index, distance });
+  }));
+  pairs.sort((a, b) => a.distance - b.distance);
+  const used = new Set(), matched = new Map();
+  for (const { old, index } of pairs) {
+    if (used.has(old.id) || matched.has(index)) continue;
+    used.add(old.id);
+    matched.set(index, old);
+  }
+  const targets = mouths.map((mouth, index) => ({
+    ...mouth, id: matched.get(index)?.id ?? nextId++,
+  }));
+  return { targets, nextId };
+}
+
+const CamMath = { screenPoint, mouthTarget, moveParticle, matchTargets };
 if (typeof module !== 'undefined') module.exports = CamMath;
